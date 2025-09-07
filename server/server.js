@@ -27,7 +27,43 @@ let gameState = {
 
 const GAME_DURATION = 30;
 const RESULTS_DURATION = 5;
+const TICK_INTERVAL = 1000; // internal ticking every second
+const BROADCAST_INTERVAL = 5; // send time updates every 5 seconds
+const INACTIVE_TIMEOUT = 1200000;   // 2m
+const HEARTBEAT_INTERVAL = 60000; // 60s
+const BOT_COUNT = 10; // number of bots
+const bots = [];
 const CHOICES = ['rock', 'paper', 'scissors'];
+
+function botVote(bot) {
+  if (gameState.phase === "voting") {
+    const choice = CHOICES[Math.floor(Math.random() * CHOICES.length)];
+    const teamObj = bot.team === 1 ? gameState.team1 : gameState.team2;
+
+    teamObj.votes[choice]++;
+    console.log(`🤖 Bot ${bot.id} (Team ${bot.team}) voted ${choice}`);
+  }
+}
+
+// Create bots as fake players
+function initBots() {
+  for (let i = 0; i < BOT_COUNT; i++) {
+    const botId = `bot_${i}`;
+    const team = 1 + (i % 2); // Alternate teams
+    bots.push({ id: botId, team });
+    console.log(`🤖 ${botId} joined Team ${team}`);
+  }
+}
+
+// Each new voting phase → reset and make bots vote randomly
+function botVotingRound() {
+  bots.forEach(bot => {
+    setTimeout(() => {
+      botVote(bot);
+      broadcastTeamVotes(bot.team);
+    }, Math.random() * 15000); // bots vote within first 15s
+  });
+}
 
 // Helper functions
 const getWinner = (choice1, choice2) => {
@@ -50,8 +86,8 @@ const getTopChoice = (votes) => {
   return entries.reduce((a, b) => votes[a[0]] > votes[b[0]] ? a : b)[0];
 };
 
-const broadcastGameState = () => {
-  const message = JSON.stringify({
+const getGameStateMessage = (gameState) => (
+  JSON.stringify({
     type: 'gameState',
     data: {
       phase: gameState.phase,
@@ -59,17 +95,19 @@ const broadcastGameState = () => {
       timeLeft: gameState.timeLeft,
       team1Score: gameState.team1.score,
       team2Score: gameState.team2.score,
-      team1PlayerCount: gameState.team1.players.length,
-      team2PlayerCount: gameState.team2.players.length,
+      team1PlayerCount: gameState.team1.players.length + Math.floor(BOT_COUNT / 2),
+      team2PlayerCount: gameState.team2.players.length + Math.floor(BOT_COUNT / 2),
       winner: gameState.winner,
       team1Choice: gameState.team1.choice,
       team2Choice: gameState.team2.choice
     }
-  });
+  })
+);
 
+const broadcastGameState = () => {
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(message);
+      client.send(getGameStateMessage(gameState));
     }
   });
 };
@@ -93,7 +131,6 @@ const broadcastTeamVotes = (teamNumber) => {
 };
 
 const startVotingPhase = () => {
-  console.log(`Starting game ${gameState.gameNumber}`);
   gameState.phase = 'voting';
   gameState.timeLeft = GAME_DURATION;
   gameState.team1.votes = { rock: 0, paper: 0, scissors: 0 };
@@ -102,7 +139,9 @@ const startVotingPhase = () => {
   gameState.team2.choice = null;
   gameState.winner = null;
 
-  // Reset all players' vote status
+
+  botVotingRound();
+
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
       client.hasVoted = false;
@@ -110,59 +149,54 @@ const startVotingPhase = () => {
     }
   });
 
-  // Clear existing timer
-  if (gameState.timer) {
-    clearInterval(gameState.timer);
-  }
+  broadcastGameState(); // initial broadcast
 
-  // Start countdown timer
+  clearInterval(gameState.timer);
+  let tickCount = 0;
+
   gameState.timer = setInterval(() => {
     gameState.timeLeft--;
-    
+    tickCount++;
+    // console.log(`Players: \nT1=${gameState.team1.players}\n\nT2=${gameState.team2.players}\n\n`);
+
     if (gameState.timeLeft <= 0) {
       clearInterval(gameState.timer);
       startResultsPhase();
-    } else {
+    } else if (tickCount % BROADCAST_INTERVAL === 0) {
+      // send a heartbeat update so clients stay in sync
       broadcastGameState();
     }
-  }, 1000);
-
-  broadcastGameState();
+  }, TICK_INTERVAL);
 };
 
 const startResultsPhase = () => {
-  console.log('Calculating results...');
-  
-  // Calculate results
   gameState.team1.choice = getTopChoice(gameState.team1.votes);
   gameState.team2.choice = getTopChoice(gameState.team2.votes);
   gameState.winner = getWinner(gameState.team1.choice, gameState.team2.choice);
-  
-  if (gameState.winner === 'team1') {
-    gameState.team1.score++;
-  } else if (gameState.winner === 'team2') {
-    gameState.team2.score++;
-  }
-  
+
+  if (gameState.winner === 'team1') gameState.team1.score++;
+  else if (gameState.winner === 'team2') gameState.team2.score++;
+
   gameState.phase = 'results';
   gameState.timeLeft = RESULTS_DURATION;
-  
-  console.log(`Game ${gameState.gameNumber} results: Team 1 (${gameState.team1.choice}) vs Team 2 (${gameState.team2.choice}) - Winner: ${gameState.winner}`);
-  
-  broadcastGameState();
-  
-  // Start results countdown
+
+  broadcastGameState(); // initial broadcast
+
+  clearInterval(gameState.timer);
+  let tickCount = 0;
+
   gameState.timer = setInterval(() => {
     gameState.timeLeft--;
-    
+    tickCount++;
+
     if (gameState.timeLeft <= 0) {
       clearInterval(gameState.timer);
       gameState.gameNumber++;
       startVotingPhase();
-    } else {
+    } else if (tickCount % BROADCAST_INTERVAL === 0) {
       broadcastGameState();
     }
-  }, 1000);
+  }, TICK_INTERVAL);
 };
 
 const assignPlayerToTeam = (playerId) => {
@@ -189,40 +223,32 @@ const assignPlayerToTeam = (playerId) => {
   return assignedTeam;
 };
 
-const generatePlayerName = () => {
-  const adjectives = ['Swift', 'Brave', 'Smart', 'Quick', 'Bold', 'Wise', 'Cool', 'Fast', 'Sharp', 'Bright'];
-  const animals = ['Fox', 'Wolf', 'Eagle', 'Lion', 'Tiger', 'Bear', 'Hawk', 'Shark', 'Falcon', 'Panther'];
-  const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-  const animal = animals[Math.floor(Math.random() * animals.length)];
-  return `${adj}${animal}${Math.floor(Math.random() * 99) + 1}`;
-};
-
 wss.on('connection', (ws) => {
   console.log('New player connected');
 
   // Immediately assign player to team with auto-generated name
-  ws.playerId = 'player_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
-  ws.playerName = generatePlayerName();
+  ws.playerId = 'player_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now();
   ws.hasVoted = false;
   ws.playerVote = null;
+  ws.lastSeen = Date.now();
   
   const team = assignPlayerToTeam(ws.playerId);
   
-  console.log(`${ws.playerName} joined Team ${team}`);
+  console.log(`${ws.playerId} joined Team ${team}`);
   
   // Send player their assignment
   ws.send(JSON.stringify({
     type: 'joined',
     data: { 
       team, 
-      playerName: ws.playerName,
       playerId: ws.playerId
     }
   }));
   
   // Send current game state
-  broadcastGameState();
-  
+  // broadcastGameState();
+  ws.send(getGameStateMessage(gameState));
+
   // Send current team votes if in voting phase
   if (gameState.phase === 'voting') {
     broadcastTeamVotes(team);
@@ -230,6 +256,7 @@ wss.on('connection', (ws) => {
 
   ws.on('message', (message) => {
     try {
+      ws.lastSeen = Date.now();
       const data = JSON.parse(message);
       
       switch (data.type) {
@@ -241,9 +268,9 @@ wss.on('connection', (ws) => {
             team.votes[data.choice]++;
             ws.hasVoted = true;
             ws.playerVote = data.choice;
-            
-            console.log(`${ws.playerName} (Team ${playerTeam}) voted for ${data.choice}`);
-            
+
+            console.log(`${ws.playerId} (Team ${playerTeam}) voted for ${data.choice}`);
+
             ws.send(JSON.stringify({
               type: 'voteConfirmed',
               data: { choice: data.choice }
@@ -259,23 +286,35 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    console.log(`${ws.playerName || 'Unknown player'} disconnected`);
-    
-    if (ws.playerId) {
-      // Remove player from teams
-      gameState.team1.players = gameState.team1.players.filter(id => id !== ws.playerId);
-      gameState.team2.players = gameState.team2.players.filter(id => id !== ws.playerId);
-      broadcastGameState();
-    }
+    console.log(`${ws.playerId || 'Unknown player'} disconnected`);
+    removePlayer(ws.playerId);
   });
 });
+
+// Function to remove a player cleanly
+function removePlayer(playerId) {
+  if (!playerId) return;
+  gameState.team1.players = gameState.team1.players.filter(id => id !== playerId);
+  gameState.team2.players = gameState.team2.players.filter(id => id !== playerId);
+}
+
+setInterval(() => {
+  const now = Date.now();
+  wss.clients.forEach((ws) => {
+    if (now - ws.lastSeen > INACTIVE_TIMEOUT) {
+      console.log(`${ws.playerId} is inactive, last seen ${(now - ws.lastSeen)/1000}s ago removing...`);
+      removePlayer(ws.playerId);
+      return ws.terminate();
+    }
+  });
+}, HEARTBEAT_INTERVAL);
 
 // Start the game immediately when server starts
 console.log('Starting continuous game...');
 startVotingPhase();
+initBots();
 
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`WebSocket server running on port ${PORT}`);
-  console.log('Game is running continuously - players can join anytime!');
 });

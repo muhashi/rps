@@ -29,12 +29,26 @@ export default function AutoRunningTeamRPS() {
   });
 
   const playerDataRef = useRef({ id: null, name: '', team: null, hasVoted: false, vote: null });
-  
+  // console.log('Game State:', gameState);
+  // console.log('Player Data:', playerData);
   const [teamVotes, setTeamVotes] = useState({ rock: 0, paper: 0, scissors: 0 });
 
   useEffect(() => {
     playerDataRef.current = playerData;
   }, [playerData]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setGameState(prev => {
+        if (prev.timeLeft > 0) {
+          return { ...prev, timeLeft: prev.timeLeft - 1 };
+        }
+        return prev;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Connect to WebSocket
   const connectWebSocket = () => {
@@ -54,9 +68,25 @@ export default function AutoRunningTeamRPS() {
         switch (message.type) {
           case 'gameState':
             setGameState(message.data);
+            // setGameState(prev => {
+            //   const newState = { ...prev, ...message.data };
+
+            //   // Detect phase change
+            //   if (prev.phase !== "voting" && newState.phase === "voting") {
+            //     // New round started → reset votes
+            //     setTeamVotes({ rock: 0, paper: 0, scissors: 0 });
+            //     setPlayerData(p => ({ ...p, hasVoted: false, vote: null }));
+            //   }
+
+            //   return newState;
+            // });
             // Reset player vote state when new game starts
-            if (message.data.phase === 'voting' && playerDataRef.current.hasVoted) {
-              setPlayerData(prev => ({ ...prev, hasVoted: false, vote: null }));
+
+            if (message.data.phase === 'results') {
+              setTeamVotes({ rock: 0, paper: 0, scissors: 0 });
+              if (playerDataRef.current.hasVoted) {
+                setPlayerData(prev => ({ ...prev, hasVoted: false, vote: null }));
+              }
             }
             break;
             
@@ -79,9 +109,7 @@ export default function AutoRunningTeamRPS() {
             break;
             
           case 'teamVotes':
-            if (message.data.team === playerDataRef.current.team) {
-              setTeamVotes(message.data.votes);
-            }
+            setTeamVotes(message.data.votes);
             break;
         }
       } catch (error) {
@@ -140,48 +168,50 @@ export default function AutoRunningTeamRPS() {
   // Connection status
   if (!connected || !playerData.team) {
     return (
-      <Container size="sm" py="xl">
-        <Card shadow="sm" padding="lg">
-          <Stack align="center" spacing="md">
-            <Title order={2}>🎮 Joining Game...</Title>
-            <Text color="dimmed">
-              {!connected ? 'Connecting to game server...' : 'Getting assigned to a team...'}
-            </Text>
-            <Progress value={0} animate />
-            <Text size="sm" color="dimmed">
-              No registration needed - you'll be assigned automatically!
-            </Text>
-          </Stack>
-        </Card>
+      <Container style={{ height: '100%', minHeight: '100vh', width: '100vw', maxWidth: '100%', background: 'linear-gradient(135deg, #74ebd5 0%, #ACB6E5 100%)', }}>
+        <Stack spacing="lg" style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
+          <Card shadow="xl" padding="lg">
+            <Stack align="center" spacing="md">
+              <Title order={2}>🎮 Joining Game...</Title>
+              <Text c="dimmed">
+                {!connected ? 'Connecting to game server...' : 'Getting assigned to a team...'}
+              </Text>
+              <Progress value={0} animate />
+              <Text size="sm" c="dimmed">
+                No registration needed - you'll join automatically!
+              </Text>
+            </Stack>
+          </Card>
+        </Stack>
       </Container>
     );
   }
 
   return (
-    <Container style={{ width: '100vw', maxWidth: '100%' }}>
+    <Container style={{ height: '100%', minHeight: '100vh', width: '100vw', maxWidth: '100%', background: 'linear-gradient(135deg, #74ebd5 0%, #ACB6E5 100%)', }}>
       <Stack spacing="lg" style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
         {/* Game Header */}
         <Card shadow="sm" padding="lg">
           <Group position="apart" mb="md">
             <div>
-              <Title order={2}>🚀 Live Team Battle</Title>
-              <Text color="dimmed">
+              <Title order={2}>Rocks, Paper, Scissors Democracy</Title>
+              <Text c="dimmed">
                 Round #{gameState.gameNumber} • {connected ? '🟢 Live' : '🔴 Reconnecting'}
               </Text>
             </div>
             <Group>
-              <Badge color="blue" size="lg">Team 1: {gameState.team1Score}</Badge>
-              <Badge color="red" size="lg">Team 2: {gameState.team2Score}</Badge>
+              <Badge color="blue" size="lg">Team Dolphin 🐬 Score: {gameState.team1Score}</Badge>
+              <Badge color="yellow" size="lg">Team Banana 🍌 Score: {gameState.team2Score}</Badge>
             </Group>
           </Group>
           
           <Group position="apart" mb="md">
             <Badge 
-              color={playerData.team === 1 ? 'blue' : 'red'} 
+              color={playerData.team === 1 ? 'blue' : 'yellow'} 
               size="lg"
               variant="filled"
             >
-              You're on Team {playerData.team}
+              You're on Team {playerData.team === 1 ? 'Dolphin 🐬' : 'Banana 🍌'}
             </Badge>
             <Badge variant="outline" size="md">
               {gameState.phase === 'voting' ? '⚔️ Battle Phase' : '🏆 Results'}
@@ -189,11 +219,11 @@ export default function AutoRunningTeamRPS() {
           </Group>
 
           <Group spacing="xl">
-            <Text size="sm" color="dimmed">
-              🔵 Team 1: {gameState.team1PlayerCount} fighters
+            <Text size="sm" c="dimmed">
+              🐬 Team Dolphin: {gameState.team1PlayerCount} players
             </Text>
-            <Text size="sm" color="dimmed">
-              🔴 Team 2: {gameState.team2PlayerCount} fighters
+            <Text size="sm" c="dimmed">
+              🍌 Team Banana: {gameState.team2PlayerCount} players
             </Text>
           </Group>
         </Card>
@@ -205,7 +235,7 @@ export default function AutoRunningTeamRPS() {
               <Group position="apart" align="center">
                 <Title order={3}>⚔️ Choose Your Weapon!</Title>
                 <Badge color="orange" size="lg" variant="filled">
-                  {gameState.timeLeft}s remaining
+                  {gameState.timeLeft} seconds remaining
                 </Badge>
               </Group>
               
@@ -217,10 +247,10 @@ export default function AutoRunningTeamRPS() {
               
               {!playerData.hasVoted ? (
                 <>
-                  <Text align="center" color="dimmed" mb="md">
+                  <Text align="center" c="dimmed" mb="md">
                     Vote now! Your team is counting on you!
                   </Text>
-                  <Group position="center" spacing="md">
+                  <Group justify="center" spacing="md">
                     {CHOICES.map(choice => (
                       <Button
                         key={choice}
@@ -232,7 +262,8 @@ export default function AutoRunningTeamRPS() {
                           minWidth: '140px',
                           fontSize: '1.1rem'
                         }}
-                        color={playerData.team === 1 ? 'blue' : 'red'}
+                        // color={playerData.team === 1 ? 'blue' : 'yellow'}
+                        color="blue"
                       >
                         <Stack align="center" spacing={8}>
                           <Text size="2.5rem">{CHOICE_EMOJIS[choice]}</Text>
@@ -263,8 +294,8 @@ export default function AutoRunningTeamRPS() {
 
               {/* Team Vote Display */}
               <Card withBorder>
-                <Title order={4} mb="md" color={playerData.team === 1 ? 'blue' : 'red'}>
-                  🛡️ Team {playerData.team} Strategy
+                <Title order={4} mb="md" color={playerData.team === 1 ? 'blue' : 'yellow'}>
+                  🛡️ Team {playerData.team === 1 ? 'Dolphin 🐬' : 'Banana 🍌'} Strategy
                 </Title>
                 {CHOICES.map(choice => {
                   const percentage = getVotePercentage(choice, teamVotes);
@@ -312,7 +343,7 @@ export default function AutoRunningTeamRPS() {
                   }}
                 >
                   <Stack align="center">
-                    <Badge color="blue" size="lg" variant="filled">Team 1</Badge>
+                    <Badge color="blue" size="lg" variant="filled">Team Dolphin 🐬</Badge>
                     <Text size="4rem">{CHOICE_EMOJIS[gameState.team1Choice]}</Text>
                     <Text weight={600} size="lg">
                       {gameState.team1Choice?.charAt(0).toUpperCase() + gameState.team1Choice?.slice(1)}
@@ -335,7 +366,7 @@ export default function AutoRunningTeamRPS() {
                   }}
                 >
                   <Stack align="center">
-                    <Badge color="red" size="lg" variant="filled">Team 2</Badge>
+                    <Badge color="yellow" size="lg" variant="filled">Team Banana 🍌</Badge>
                     <Text size="4rem">{CHOICE_EMOJIS[gameState.team2Choice]}</Text>
                     <Text weight={600} size="lg">
                       {gameState.team2Choice?.charAt(0).toUpperCase() + gameState.team2Choice?.slice(1)}
@@ -346,28 +377,28 @@ export default function AutoRunningTeamRPS() {
               </Group>
 
               <Badge 
-                color={gameState.winner === 'tie' ? 'gray' : (gameState.winner === 'team1' ? 'blue' : 'red')} 
+                color={gameState.winner === 'tie' ? 'gray' : (gameState.winner === 'team1' ? 'blue' : 'yellow')} 
                 size="xl" 
                 variant="filled"
                 style={{ fontSize: '1.2rem', padding: '12px 24px' }}
               >
                 {gameState.winner === 'tie' 
                   ? "🤝 It's a Tie!" 
-                  : `🎉 Team ${gameState.winner?.slice(-1)} Wins the Round!`}
+                  : `🎉 Team ${gameState.winner === 'team1' ? 'Dolphin 🐬' : 'Banana 🍌'} Wins the Round!`}
               </Badge>
 
               {gameState.winner === `team${playerData.team}` && (
-                <Text color="green" size="xl" weight={700}>
+                <Text c="green" size="xl" weight={700}>
                   🌟 Your team dominated this round! 🌟
                 </Text>
               )}
               {gameState.winner !== `team${playerData.team}` && gameState.winner !== 'tie' && (
-                <Text color="orange" size="lg" weight={500}>
+                <Text c="orange" size="lg" weight={500}>
                   💪 Get ready for revenge in the next round!
                 </Text>
               )}
 
-              <Text color="dimmed" align="center">
+              <Text c="dimmed" align="center">
                 🔄 Next battle starts automatically... Stay ready!
               </Text>
             </Stack>
