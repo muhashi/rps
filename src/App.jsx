@@ -52,7 +52,7 @@ export default function AutoRunningTeamRPS() {
 
   // Connect to WebSocket
   const connectWebSocket = () => {
-    const wsUrl = 'ws://localhost:8080'; // Change this to your server URL
+    const wsUrl = import.meta.env.VITE_WEBSOCKET_URL || 'ws://localhost:8080';
     ws.current = new WebSocket(wsUrl);
 
     ws.current.onopen = () => {
